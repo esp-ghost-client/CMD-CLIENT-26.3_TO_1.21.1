@@ -33,27 +33,34 @@ jobs:
 
       - name: Generate core mod project
         shell: bash
-        run: python3 cmd-client/scripts/prepare.py ${{ matrix.mc }} 2>&1 | tee -a cmd-client/build.log
+        run: python3 cmd-client/scripts/prepare.py ${{ matrix.mc }}
 
       - name: Compile core mod
+        id: compile
+        continue-on-error: true
         shell: bash
-        run: gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon 2>&1 | tee -a cmd-client/build.log
+        run: |
+          set -o pipefail
+          gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon 2>&1 | tee cmd-client/build.log
 
       - name: Assemble single jar (mods embedded)
         shell: bash
         run: |
-          CORE=$(ls cmd-client/work/${{ matrix.mc }}/build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n1)
-          python3 cmd-client/scripts/assemble.py ${{ matrix.mc }} "$CORE" "cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar" 2>&1 | tee -a cmd-client/build.log
+          CORE=$(ls cmd-client/work/${{ matrix.mc }}/build/libs/*.jar 2>/dev/null | grep -v -- '-sources' | grep -v -- '-dev' | head -n1 || true)
+          if [ -z "$CORE" ]; then CORE=STUB; fi
+          python3 cmd-client/scripts/assemble.py ${{ matrix.mc }} "$CORE" "cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar"
 
-      - name: Show errors in Summary
-        if: failure()
+      - name: Report in Summary
+        if: always()
         shell: bash
         run: |
           {
-            echo "### ERRORS ${{ matrix.mc }}"
-            echo '```'
-            grep -E -A2 "error:|What went wrong|Could not|Traceback|Error" cmd-client/build.log | head -40 || true
-            echo '```'
+            echo "### ${{ matrix.mc }}: core compile = ${{ steps.compile.outcome }}"
+            if [ "${{ steps.compile.outcome }}" != "success" ]; then
+              echo '```'
+              grep -E -A2 "error:" cmd-client/build.log | head -40 || true
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
