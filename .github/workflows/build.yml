@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Unzip project
+        run: unzip -q cmd-client-source.zip
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -25,19 +28,20 @@ jobs:
           gradle-version: "9.8.1"
 
       - name: Generate core mod project
-        run: python3 scripts/prepare.py ${{ matrix.mc }}
+        run: python3 cmd-client/scripts/prepare.py ${{ matrix.mc }}
 
       - name: Compile core mod
-        run: gradle -p work/${{ matrix.mc }} build --no-daemon
+        run: gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon
 
       - name: Assemble single jar (mods embedded)
         run: |
-          CORE=$(ls work/${{ matrix.mc }}/build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n1)
-          python3 scripts/assemble.py ${{ matrix.mc }} "$CORE" "dist/CMD-CLIENT-${{ matrix.mc }}.jar"
+          CORE=$(ls cmd-client/work/${{ matrix.mc }}/build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n1)
+          python3 cmd-client/scripts/assemble.py ${{ matrix.mc }} "$CORE" "cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar"
 
       - uses: actions/upload-artifact@v4
         with:
           name: CMD-CLIENT-${{ matrix.mc }}
           path: |
-            dist/CMD-CLIENT-${{ matrix.mc }}.jar
-            dist/missing-${{ matrix.mc }}.txt
+            cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar
+            cmd-client/dist/fabric-api-${{ matrix.mc }}.jar
+            cmd-client/dist/missing-${{ matrix.mc }}.txt
