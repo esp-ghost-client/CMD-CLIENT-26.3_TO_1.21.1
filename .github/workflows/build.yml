@@ -1,0 +1,43 @@
+name: Build CMD CLIENT
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mc: ["1.21.1", "1.21.4", "1.21.8", "1.21.11", "26.3"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.mc == '26.3' && '25' || '21' }}
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.8.1"
+
+      - name: Generate core mod project
+        run: python3 scripts/prepare.py ${{ matrix.mc }}
+
+      - name: Compile core mod
+        run: gradle -p work/${{ matrix.mc }} build --no-daemon
+
+      - name: Assemble single jar (mods embedded)
+        run: |
+          CORE=$(ls work/${{ matrix.mc }}/build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n1)
+          python3 scripts/assemble.py ${{ matrix.mc }} "$CORE" "dist/CMD-CLIENT-${{ matrix.mc }}.jar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CMD-CLIENT-${{ matrix.mc }}
+          path: |
+            dist/CMD-CLIENT-${{ matrix.mc }}.jar
+            dist/missing-${{ matrix.mc }}.txt
