@@ -17,12 +17,10 @@ jobs:
 
       - name: Unzip project
         run: |
-          echo "Files in repo:"; find . -path ./.git -prune -o -type f -print | head -50
           ZIP=$(find . -iname '*.zip' -not -path './.git/*' | head -n1)
-          if [ -z "$ZIP" ]; then echo "NO ZIP FOUND in repo - upload cmd-client-source.zip"; exit 1; fi
+          if [ -z "$ZIP" ]; then echo "NO ZIP FOUND in repo"; exit 1; fi
           echo "Using: $ZIP"
           unzip -q "$ZIP"
-          ls
 
       - uses: actions/setup-java@v4
         with:
@@ -34,15 +32,29 @@ jobs:
           gradle-version: "9.8.1"
 
       - name: Generate core mod project
-        run: python3 cmd-client/scripts/prepare.py ${{ matrix.mc }}
+        shell: bash
+        run: python3 cmd-client/scripts/prepare.py ${{ matrix.mc }} 2>&1 | tee -a cmd-client/build.log
 
       - name: Compile core mod
-        run: gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon
+        shell: bash
+        run: gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon 2>&1 | tee -a cmd-client/build.log
 
       - name: Assemble single jar (mods embedded)
+        shell: bash
         run: |
           CORE=$(ls cmd-client/work/${{ matrix.mc }}/build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n1)
-          python3 cmd-client/scripts/assemble.py ${{ matrix.mc }} "$CORE" "cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar"
+          python3 cmd-client/scripts/assemble.py ${{ matrix.mc }} "$CORE" "cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar" 2>&1 | tee -a cmd-client/build.log
+
+      - name: Show errors in Summary
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "### ERRORS ${{ matrix.mc }}"
+            echo '```'
+            grep -E -A2 "error:|What went wrong|Could not|Traceback|Error" cmd-client/build.log | head -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
