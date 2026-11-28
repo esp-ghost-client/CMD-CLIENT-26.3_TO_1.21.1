@@ -15,12 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Unzip project
+      - name: Unzip project (newest zip wins)
+        shell: bash
         run: |
-          ZIP=$(find . -iname '*.zip' -not -path './.git/*' | head -n1)
-          if [ -z "$ZIP" ]; then echo "NO ZIP FOUND in repo"; exit 1; fi
-          echo "Using: $ZIP"
-          unzip -q "$ZIP"
+          BEST=""; BESTID=""
+          while IFS= read -r z; do
+            id=$(unzip -p "$z" 'cmd-client/lists/build_id.txt' 2>/dev/null | head -n1 | tr -d '\r' || true)
+            echo "zip: $z  build: ${id:-none}"
+            if [ -n "$id" ]; then
+              if [ -z "$BESTID" ] || [ "$(printf '%s\n%s\n' "$BESTID" "$id" | sort -V | tail -n1)" = "$id" ]; then BEST="$z"; BESTID="$id"; fi
+            fi
+          done < <(find . -iname '*.zip' -not -path './.git/*')
+          if [ -z "$BEST" ]; then BEST=$(find . -iname '*.zip' -not -path './.git/*' | head -n1); fi
+          if [ -z "$BEST" ]; then echo "NO ZIP FOUND in repo"; exit 1; fi
+          echo "USING: $BEST (build ${BESTID:-unknown})"
+          echo "### zip used: $BEST  |  build ${BESTID:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+          unzip -q "$BEST"
 
       - uses: actions/setup-java@v4
         with:
@@ -41,14 +51,22 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon 2>&1 | tee cmd-client/build.log
+          if ! gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon 2>&1 | tee cmd-client/build.log; then
+            echo "=== compile failed, retrying WITHOUT the PvP package ===" | tee -a cmd-client/build.log
+            cp cmd-client/build.log cmd-client/build-pvp.log
+            python3 cmd-client/scripts/prepare.py ${{ matrix.mc }} nopvp
+            gradle -p cmd-client/work/${{ matrix.mc }} build --no-daemon 2>&1 | tee cmd-client/build.log
+          fi
 
-      - name: Assemble single jar (mods embedded)
+      - name: Assemble jars (full + pojav)
         shell: bash
         run: |
           CORE=$(ls cmd-client/work/${{ matrix.mc }}/build/libs/*.jar 2>/dev/null | grep -v -- '-sources' | grep -v -- '-dev' | head -n1 || true)
           if [ -z "$CORE" ]; then CORE=STUB; fi
           python3 cmd-client/scripts/assemble.py ${{ matrix.mc }} "$CORE" "cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar"
+          if [ "$CORE" != "STUB" ]; then
+            python3 cmd-client/scripts/make_lite.py "$CORE" "cmd-client/dist/CMD-CLIENT-POJAV-${{ matrix.mc }}.jar"
+          fi
 
       - name: Report in Summary
         if: always()
@@ -61,6 +79,12 @@ jobs:
               grep -E -A2 "error:" cmd-client/build.log | head -40 || true
               echo '```'
             fi
+            if [ -f cmd-client/build-pvp.log ]; then
+              echo "PvP package failed to compile (retried without it):"
+              echo '```'
+              grep -E -A2 "error:" cmd-client/build-pvp.log | head -30 || true
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -68,5 +92,6 @@ jobs:
           name: CMD-CLIENT-${{ matrix.mc }}
           path: |
             cmd-client/dist/CMD-CLIENT-${{ matrix.mc }}.jar
+            cmd-client/dist/CMD-CLIENT-POJAV-${{ matrix.mc }}.jar
             cmd-client/dist/fabric-api-${{ matrix.mc }}.jar
             cmd-client/dist/missing-${{ matrix.mc }}.txt
